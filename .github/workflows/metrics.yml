@@ -19,21 +19,52 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fetch stats cards from github-readme-stats
+      # 拉取 github-readme-stats 源码,在本地渲染卡片(不依赖官方 Vercel 服务)
+      - uses: actions/checkout@v4
+        with:
+          repository: anuraghazra/github-readme-stats
+          path: grs
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: grs
+        run: npm ci --ignore-scripts
+
+      - name: Generate cards locally
+        env:
+          # github-readme-stats 从 PAT_1 环境变量读取 token
+          PAT_1: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          fetch() {
-            local url="$1" out="$2"
-            curl -fsSL --retry 5 --retry-delay 30 -o "$out.tmp" "$url"
-            # API 限流时会返回一张错误卡片,此时保留旧图不覆盖
-            if grep -q "Something went wrong" "$out.tmp"; then
-              echo "::warning::$out 获取失败(API 限流),保留旧图"
-              rm -f "$out.tmp"
-            else
-              mv "$out.tmp" "$out"
-            fi
-          }
-          fetch "https://github-readme-stats.vercel.app/api?username=LeslieZhoa&show_icons=true&theme=dark&rank_icon=default&include_all_commits=true" github-stats.svg
-          fetch "https://github-readme-stats.vercel.app/api/top-langs/?username=LeslieZhoa&theme=dark&layout=compact" top-langs.svg
+          cat > grs/generate.mjs <<'EOF'
+          import fs from "fs";
+          import { fetchStats } from "./src/fetchers/stats.js";
+          import { renderStatsCard } from "./src/cards/stats.js";
+          import { fetchTopLanguages } from "./src/fetchers/top-languages.js";
+          import { renderTopLanguages } from "./src/cards/top-languages.js";
+
+          const username = "LeslieZhoa";
+
+          const stats = await fetchStats(username, true);
+          fs.writeFileSync(
+            "../github-stats.svg",
+            renderStatsCard(stats, {
+              theme: "dark",
+              show_icons: true,
+              rank_icon: "default",
+              include_all_commits: true,
+            })
+          );
+
+          const langs = await fetchTopLanguages(username);
+          fs.writeFileSync(
+            "../top-langs.svg",
+            renderTopLanguages(langs, { theme: "dark", layout: "compact" })
+          );
+          EOF
+          cd grs && node generate.mjs
 
       - name: Commit updated cards
         run: |
