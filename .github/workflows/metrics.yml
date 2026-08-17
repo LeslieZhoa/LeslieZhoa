@@ -1,4 +1,4 @@
-name: GitHub Metrics
+name: Update Stats Cards
 
 on:
   # 每天 UTC 0 点自动更新一次
@@ -14,20 +14,30 @@ permissions:
   contents: write
 
 jobs:
-  metrics:
+  update-cards:
     runs-on: ubuntu-latest
     steps:
-      - uses: lowlighter/metrics@latest
-        with:
-          # 优先使用 METRICS_TOKEN(可选的 PAT),否则用内置 GITHUB_TOKEN
-          token: ${{ secrets.METRICS_TOKEN || secrets.GITHUB_TOKEN }}
-          user: LeslieZhoa
-          template: classic
-          config_timezone: Asia/Shanghai
-          filename: github-metrics.svg
-          # 基础统计:头部、活动、社区、仓库信息
-          base: header, activity, community, repositories, metadata
-          # 常用语言统计(替代原来的 Top Langs 卡片)
-          plugin_languages: yes
-          plugin_languages_limit: 8
-          plugin_languages_sections: most-used
+      - uses: actions/checkout@v4
+
+      - name: Fetch stats cards from github-readme-stats
+        run: |
+          fetch() {
+            local url="$1" out="$2"
+            curl -fsSL --retry 5 --retry-delay 30 -o "$out.tmp" "$url"
+            # API 限流时会返回一张错误卡片,此时保留旧图不覆盖
+            if grep -q "Something went wrong" "$out.tmp"; then
+              echo "::warning::$out 获取失败(API 限流),保留旧图"
+              rm -f "$out.tmp"
+            else
+              mv "$out.tmp" "$out"
+            fi
+          }
+          fetch "https://github-readme-stats.vercel.app/api?username=LeslieZhoa&show_icons=true&theme=dark&rank_icon=default&include_all_commits=true" github-stats.svg
+          fetch "https://github-readme-stats.vercel.app/api/top-langs/?username=LeslieZhoa&theme=dark&layout=compact" top-langs.svg
+
+      - name: Commit updated cards
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add github-stats.svg top-langs.svg
+          git diff --cached --quiet || (git commit -m "chore: update stats cards" && git push)
